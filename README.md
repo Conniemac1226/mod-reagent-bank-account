@@ -35,6 +35,14 @@ If you don’t install the addon, this module is not usable.
 
 Click the **Reagent Bank icon on the character paperdoll**.
 
+### Profession Integration
+
+- Open any profession window
+- Use the **"Withdraw Needed"** button
+- Automatically pulls missing reagents for the selected recipe
+- Supports multi-craft amounts
+- Optional auto-deposit of leftovers when closing the profession window
+
 ---
 
 ## What it does
