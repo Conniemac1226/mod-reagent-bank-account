@@ -53,6 +53,6 @@ Server:
 - ReagentBankAccount_loader.cpp :contentReference[oaicite:0]{index=0}
 
 Addon:
-- ReagentBankUI.lua :contentReference[oaicite:1]{index=1}
+- ReagentBankUI.lua
 
 ---
