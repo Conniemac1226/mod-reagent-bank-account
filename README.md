@@ -1,4 +1,4 @@
-Reagent bank system for AzerothCore with a required UI addon.
+Reagent bank system for AzerothCore with a required UI addon. Based off the countless of other reagent bank mods.
 
 <img width="1273" height="1097" alt="Reagent1" src="https://github.com/user-attachments/assets/803a5f8d-50e2-495e-9169-692e12ff9c69" />
 
