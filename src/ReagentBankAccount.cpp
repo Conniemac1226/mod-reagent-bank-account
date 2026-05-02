@@ -50,6 +50,7 @@ uint32 g_reagentBankMaxItemsPerPage = DEFAULT_REAGENT_BANK_ITEMS_PER_PAGE;
 bool g_accountWideReagentBank = false;
 bool g_reagentBankEnabled = true;
 bool g_reagentBankAutoMigrate = true;
+bool g_reagentBankEnableNpc = false;
 
 static bool g_reagentBankStorageReady = false;
 
@@ -215,9 +216,10 @@ namespace ReagentBank
     static void LoadConfig()
     {
         g_reagentBankEnabled = sConfigMgr->GetOption<bool>("ReagentBankAccount.Enable", true);
-        g_accountWideReagentBank = sConfigMgr->GetOption<bool>("ReagentBankAccount.AccountWide", false);
+        g_accountWideReagentBank = sConfigMgr->GetOption<bool>("ReagentBankAccount.AccountWide", true);
         g_reagentBankMaxItemsPerPage = sConfigMgr->GetOption<uint32>("ReagentBankAccount.MaxItemsPerPage", DEFAULT_REAGENT_BANK_ITEMS_PER_PAGE);
         g_reagentBankAutoMigrate = sConfigMgr->GetOption<bool>("ReagentBankAccount.AutoMigrate", true);
+        g_reagentBankEnableNpc = sConfigMgr->GetOption<bool>("ReagentBankAccount.EnableNpc", false);
 
         if (g_reagentBankMaxItemsPerPage == 0)
             g_reagentBankMaxItemsPerPage = DEFAULT_REAGENT_BANK_ITEMS_PER_PAGE;
@@ -440,14 +442,19 @@ namespace ReagentBank
         if (!proto)
             return false;
 
-        if (!(proto->Class == ITEM_CLASS_TRADE_GOODS || proto->Class == ITEM_CLASS_GEM))
+        if (!(proto->Class == ITEM_CLASS_TRADE_GOODS || proto->Class == ITEM_CLASS_GEM || proto->Class == ITEM_CLASS_REAGENT))
             return false;
 
         if (proto->GetMaxStackSize() <= 1)
             return false;
 
         itemEntry = proto->ItemId;
-        itemSubclass = proto->Class == ITEM_CLASS_GEM ? ITEM_SUBCLASS_JEWELCRAFTING : proto->SubClass;
+        if (proto->Class == ITEM_CLASS_GEM)
+            itemSubclass = ITEM_SUBCLASS_JEWELCRAFTING;
+        else if (proto->Class == ITEM_CLASS_REAGENT)
+            itemSubclass = ITEM_SUBCLASS_TRADE_GOODS_OTHER;
+        else
+            itemSubclass = proto->SubClass;
 
         return IsCategory(itemSubclass);
     }
@@ -1333,10 +1340,11 @@ public:
             ReagentBank::EnsureStorageModeMatchesConfig();
             g_reagentBankStorageReady = true;
 
-            LOG_INFO("module", "Standalone Reagent Bank config reloaded. Enabled: {}, AccountWide: {}, AutoMigrate: {}, MaxItemsPerPage: {}",
+            LOG_INFO("module", "Standalone Reagent Bank config reloaded. Enabled: {}, AccountWide: {}, AutoMigrate: {}, EnableNpc: {}, MaxItemsPerPage: {}",
                 g_reagentBankEnabled ? "yes" : "no",
                 g_accountWideReagentBank ? "yes" : "no",
                 g_reagentBankAutoMigrate ? "yes" : "no",
+                g_reagentBankEnableNpc ? "yes" : "no",
                 g_reagentBankMaxItemsPerPage);
         }
     }
@@ -1347,10 +1355,11 @@ public:
         ReagentBank::EnsureStorageModeMatchesConfig();
         g_reagentBankStorageReady = true;
 
-        LOG_INFO("module", "Standalone Reagent Bank command module loaded. Enabled: {}, AccountWide: {}, AutoMigrate: {}, MaxItemsPerPage: {}",
+        LOG_INFO("module", "Standalone Reagent Bank command module loaded. Enabled: {}, AccountWide: {}, AutoMigrate: {}, EnableNpc: {}, MaxItemsPerPage: {}",
             g_reagentBankEnabled ? "yes" : "no",
             g_accountWideReagentBank ? "yes" : "no",
             g_reagentBankAutoMigrate ? "yes" : "no",
+            g_reagentBankEnableNpc ? "yes" : "no",
             g_reagentBankMaxItemsPerPage);
     }
 };

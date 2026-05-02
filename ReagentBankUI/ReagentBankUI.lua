@@ -146,6 +146,11 @@ local PAPERDOLL_BUTTON_BORDER_SIZE = 54
 
 local PAPERDOLL_BUTTON_HIGHLIGHT_TEXTURE = "Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight"
 local PAPERDOLL_BUTTON_HIGHLIGHT_SIZE = 52
+local MINIMAP_BUTTON_DEFAULT_ENABLED = false
+local MINIMAP_BUTTON_SIZE = 32
+local MINIMAP_BUTTON_ICON_SIZE = 17
+local MINIMAP_BUTTON_ICON_CROP = 0.08
+local MINIMAP_BUTTON_DEFAULT_ANGLE = 220
 
 local function Trim(text)
     if not text then
@@ -974,6 +979,33 @@ function RB:WithdrawNeededForSelectedRecipe()
     self:UpdateTradeSkillControls()
 end
 
+function RB:MaybeAutoWithdrawForSelectedRecipe(force)
+    ReagentBankUIDB = ReagentBankUIDB or {}
+    if not ReagentBankUIDB.autoWithdrawRecipe then
+        return
+    end
+
+    if self.busyKind then
+        return
+    end
+
+    local needs, errText, _, repeatCount = self:GetSelectedTradeSkillNeeds()
+    if errText or not needs or #needs == 0 then
+        return
+    end
+
+    local index = GetTradeSkillSelectionIndex and GetTradeSkillSelectionIndex() or 0
+    local key = tostring(index) .. ":" .. tostring(repeatCount or 1)
+    local now = GetTime()
+    if not force and self.lastAutoWithdrawKey == key and self.lastAutoWithdrawAt and (now - self.lastAutoWithdrawAt) < 1.2 then
+        return
+    end
+
+    self.lastAutoWithdrawKey = key
+    self.lastAutoWithdrawAt = now
+    self:WithdrawNeededForSelectedRecipe()
+end
+
 function RB:DepositPreparedLeftovers()
     local pending = self.pendingAutoDepositLeftovers
     self.pendingAutoDepositLeftovers = nil
@@ -1021,6 +1053,106 @@ function RB:Toggle()
 
     self.frame:Show()
     self:RequestRoot()
+end
+
+function RB:PositionMinimapButton()
+    if not self.minimapButton or not Minimap then
+        return
+    end
+
+    ReagentBankUIDB = ReagentBankUIDB or {}
+    local angle = tonumber(ReagentBankUIDB.minimapButtonAngle) or MINIMAP_BUTTON_DEFAULT_ANGLE
+    local radians = math.rad(angle)
+    local radius = 78
+    local x = math.cos(radians) * radius
+    local y = math.sin(radians) * radius
+
+    self.minimapButton:ClearAllPoints()
+    self.minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
+end
+
+function RB:UpdateMinimapButtonVisibility()
+    if not self.minimapButton then
+        return
+    end
+
+    ReagentBankUIDB = ReagentBankUIDB or {}
+    if ReagentBankUIDB.showMinimapButton then
+        self.minimapButton:Show()
+    else
+        self.minimapButton:Hide()
+    end
+end
+
+function RB:CreateMinimapButton()
+    if self.minimapButton then
+        self:UpdateMinimapButtonVisibility()
+        self:PositionMinimapButton()
+        return
+    end
+
+    if not Minimap then
+        return
+    end
+
+    local button = CreateFrame("Button", "ReagentBankUIMinimapButton", Minimap)
+    button:SetWidth(MINIMAP_BUTTON_SIZE)
+    button:SetHeight(MINIMAP_BUTTON_SIZE)
+    button:SetFrameStrata("MEDIUM")
+    button:SetMovable(true)
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    button:SetClampedToScreen(true)
+
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetTexture(PAPERDOLL_BUTTON_ICON)
+    icon:SetPoint("CENTER", 0, 0)
+    icon:SetWidth(MINIMAP_BUTTON_ICON_SIZE)
+    icon:SetHeight(MINIMAP_BUTTON_ICON_SIZE)
+    icon:SetTexCoord(MINIMAP_BUTTON_ICON_CROP, 1 - MINIMAP_BUTTON_ICON_CROP, MINIMAP_BUTTON_ICON_CROP, 1 - MINIMAP_BUTTON_ICON_CROP)
+
+    local bg = button:CreateTexture(nil, "BACKGROUND")
+    bg:SetTexture(PAPERDOLL_BUTTON_BG_TEXTURE)
+    bg:SetPoint("CENTER", 0, 1)
+    bg:SetWidth(PAPERDOLL_BUTTON_BG_SIZE)
+    bg:SetHeight(PAPERDOLL_BUTTON_BG_SIZE)
+    bg:SetVertexColor(PAPERDOLL_BUTTON_BG_R, PAPERDOLL_BUTTON_BG_G, PAPERDOLL_BUTTON_BG_B, PAPERDOLL_BUTTON_BG_A)
+
+    local border = button:CreateTexture(nil, "OVERLAY")
+    border:SetTexture(PAPERDOLL_BUTTON_BORDER_TEXTURE)
+    border:SetPoint("CENTER", 0, 1)
+    border:SetWidth(PAPERDOLL_BUTTON_BORDER_SIZE)
+    border:SetHeight(PAPERDOLL_BUTTON_BORDER_SIZE)
+
+    local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetTexture(PAPERDOLL_BUTTON_HIGHLIGHT_TEXTURE)
+    highlight:SetBlendMode("ADD")
+    highlight:SetPoint("CENTER", 0, 1)
+    highlight:SetWidth(PAPERDOLL_BUTTON_HIGHLIGHT_SIZE)
+    highlight:SetHeight(PAPERDOLL_BUTTON_HIGHLIGHT_SIZE)
+    button:SetHighlightTexture(highlight)
+
+    button:SetScript("OnClick", function(selfButton, mouseButton)
+        if mouseButton == "LeftButton" then
+            RB:Toggle()
+        else
+            ReagentBankUIDB = ReagentBankUIDB or {}
+            ReagentBankUIDB.showMinimapButton = not ReagentBankUIDB.showMinimapButton
+            RB:UpdateMinimapButtonVisibility()
+        end
+    end)
+
+    button:SetScript("OnEnter", function(selfButton)
+        GameTooltip:SetOwner(selfButton, "ANCHOR_LEFT")
+        GameTooltip:SetText("Reagent Bank", 1, 0.82, 0)
+        GameTooltip:AddLine("Left-click: open or close.", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: hide minimap button.", 0.82, 0.82, 0.82)
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave", HideTooltip)
+
+    self.minimapButton = button
+    self:PositionMinimapButton()
+    self:UpdateMinimapButtonVisibility()
 end
 
 function RB:PositionPaperDollButton()
@@ -1242,6 +1374,9 @@ function RB:UpdateTradeSkillControls()
     if self.tradeSkillAutoDepositCheck then
         self.tradeSkillAutoDepositCheck:SetChecked(ReagentBankUIDB.autoDepositLeftovers and true or false)
     end
+    if self.tradeSkillAutoWithdrawCheck then
+        self.tradeSkillAutoWithdrawCheck:SetChecked(ReagentBankUIDB.autoWithdrawRecipe and true or false)
+    end
 end
 
 function RB:CreateTradeSkillControls()
@@ -1339,6 +1474,7 @@ function RB:CreateTradeSkillControls()
     if hooksecurefunc and TradeSkillFrame_SetSelection and not self.tradeSkillSelectionHooked then
         hooksecurefunc("TradeSkillFrame_SetSelection", function()
             RB:UpdateTradeSkillControls()
+            RB:MaybeAutoWithdrawForSelectedRecipe(false)
         end)
         self.tradeSkillSelectionHooked = true
     end
@@ -1422,6 +1558,40 @@ function RB:CreateTradeSkillControls()
     end
 
     self.tradeSkillAutoDepositCheck = check
+
+    local autoWithdrawCheck = CreateFrame("CheckButton", "ReagentBankUIAutoWithdrawRecipeCheck", parent, "UICheckButtonTemplate")
+    autoWithdrawCheck:SetWidth(24)
+    autoWithdrawCheck:SetHeight(24)
+    autoWithdrawCheck:SetFrameLevel((parent:GetFrameLevel() or 1) + 20)
+    autoWithdrawCheck:SetPoint("TOPLEFT", check, "BOTTOMLEFT", 0, -2)
+    autoWithdrawCheck:SetScript("OnClick", function(selfCheck)
+        ReagentBankUIDB = ReagentBankUIDB or {}
+        ReagentBankUIDB.autoWithdrawRecipe = selfCheck:GetChecked() and true or false
+        RB:UpdateTradeSkillControls()
+    end)
+    autoWithdrawCheck:SetScript("OnEnter", function(selfCheck)
+        GameTooltip:SetOwner(selfCheck, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Auto-withdraw on recipe select/craft", 1, 0.82, 0)
+        GameTooltip:AddLine("Automatically withdraw missing reagents for the selected recipe when you select or craft.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    autoWithdrawCheck:SetScript("OnLeave", HideTooltip)
+
+    local autoWithdrawText = _G[autoWithdrawCheck:GetName() .. "Text"]
+    if autoWithdrawText then
+        autoWithdrawText:SetText("Auto-withdraw recipe")
+        autoWithdrawText:SetTextColor(1.00, 0.86, 0.46)
+    end
+
+    self.tradeSkillAutoWithdrawCheck = autoWithdrawCheck
+
+    if createButton and createButton.HookScript and not self.tradeSkillCreateHooked then
+        createButton:HookScript("OnClick", function()
+            RB:MaybeAutoWithdrawForSelectedRecipe(true)
+        end)
+        self.tradeSkillCreateHooked = true
+    end
+
     self:UpdateTradeSkillControls()
 end
 
@@ -2354,6 +2524,7 @@ end
 SLASH_REAGENTBANKUI1 = "/rbank"
 SLASH_REAGENTBANKUI2 = "/reagentbank"
 SLASH_REAGENTBANKUI3 = "/rbankui"
+SLASH_REAGENTBANKUI4 = "/craftbag"
 SlashCmdList["REAGENTBANKUI"] = function(msg)
     msg = Trim(msg or "")
 
@@ -2405,6 +2576,41 @@ SlashCmdList["REAGENTBANKUI"] = function(msg)
         return
     end
 
+    if command == "autowithdraw" then
+        ReagentBankUIDB = ReagentBankUIDB or {}
+        local lowerValue = string.lower(value or "")
+
+        if lowerValue == "on" or lowerValue == "1" or lowerValue == "true" then
+            ReagentBankUIDB.autoWithdrawRecipe = true
+        elseif lowerValue == "off" or lowerValue == "0" or lowerValue == "false" then
+            ReagentBankUIDB.autoWithdrawRecipe = false
+        else
+            ReagentBankUIDB.autoWithdrawRecipe = not ReagentBankUIDB.autoWithdrawRecipe
+        end
+
+        RB:UpdateTradeSkillControls()
+        PrintAddon("auto-withdraw on recipe select/craft " .. (ReagentBankUIDB.autoWithdrawRecipe and "enabled." or "disabled."))
+        return
+    end
+
+    if command == "minimap" then
+        ReagentBankUIDB = ReagentBankUIDB or {}
+        local lowerValue = string.lower(value or "")
+
+        if lowerValue == "on" or lowerValue == "1" or lowerValue == "true" then
+            ReagentBankUIDB.showMinimapButton = true
+        elseif lowerValue == "off" or lowerValue == "0" or lowerValue == "false" then
+            ReagentBankUIDB.showMinimapButton = false
+        else
+            ReagentBankUIDB.showMinimapButton = not ReagentBankUIDB.showMinimapButton
+        end
+
+        RB:CreateMinimapButton()
+        RB:UpdateMinimapButtonVisibility()
+        PrintAddon("minimap button " .. (ReagentBankUIDB.showMinimapButton and "enabled." or "disabled."))
+        return
+    end
+
     if command == "scale" then
         local numberValue = tonumber(value)
 
@@ -2426,6 +2632,9 @@ SlashCmdList["REAGENTBANKUI"] = function(msg)
     DEFAULT_CHAT_FRAME:AddMessage("  /rbank hide")
     DEFAULT_CHAT_FRAME:AddMessage("  /rbank scale 0.75 - 1.20")
     DEFAULT_CHAT_FRAME:AddMessage("  /rbank autodeposit on|off")
+    DEFAULT_CHAT_FRAME:AddMessage("  /rbank autowithdraw on|off")
+    DEFAULT_CHAT_FRAME:AddMessage("  /rbank minimap on|off")
+    DEFAULT_CHAT_FRAME:AddMessage("  /craftbag")
 end
 
 RB:SetScript("OnEvent", function(self, event, ...)
@@ -2437,6 +2646,15 @@ RB:SetScript("OnEvent", function(self, event, ...)
             if ReagentBankUIDB.autoDepositLeftovers == nil then
                 ReagentBankUIDB.autoDepositLeftovers = false
             end
+            if ReagentBankUIDB.autoWithdrawRecipe == nil then
+                ReagentBankUIDB.autoWithdrawRecipe = false
+            end
+            if ReagentBankUIDB.showMinimapButton == nil then
+                ReagentBankUIDB.showMinimapButton = MINIMAP_BUTTON_DEFAULT_ENABLED
+            end
+            if ReagentBankUIDB.minimapButtonAngle == nil then
+                ReagentBankUIDB.minimapButtonAngle = MINIMAP_BUTTON_DEFAULT_ANGLE
+            end
             if ReagentBankUIDB.tradeSkillPrepareCount == nil then
                 ReagentBankUIDB.tradeSkillPrepareCount = 1
             else
@@ -2445,19 +2663,23 @@ RB:SetScript("OnEvent", function(self, event, ...)
             self:ApplySavedPosition()
             self:ApplyScale()
             self:CreatePaperDollButton()
+            self:CreateMinimapButton()
             self:CreateTradeSkillControls()
         elseif addonName == "Blizzard_TradeSkillUI" then
             self:CreateTradeSkillControls()
         end
     elseif event == "PLAYER_LOGIN" then
         self:CreatePaperDollButton()
+        self:CreateMinimapButton()
         self:CreateTradeSkillControls()
     elseif event == "TRADE_SKILL_SHOW" then
         self:CreateTradeSkillControls()
         self:UpdateTradeSkillControls()
+        self:MaybeAutoWithdrawForSelectedRecipe(false)
     elseif event == "TRADE_SKILL_UPDATE" then
         self:CreateTradeSkillControls()
         self:UpdateTradeSkillControls()
+        self:MaybeAutoWithdrawForSelectedRecipe(false)
     elseif event == "TRADE_SKILL_CLOSE" then
         self:HandleTradeSkillClosed()
     elseif event == "CHAT_MSG_SYSTEM" then

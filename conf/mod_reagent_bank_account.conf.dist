@@ -12,9 +12,16 @@ ReagentBankAccount.Enable = 1
 
 #    ReagentBankAccount.AccountWide
 #        Description: Account-wide reagent bank
+#        Default:     1 - Enabled
+#                     0 - Disabled
+ReagentBankAccount.AccountWide = 1
+
+#    ReagentBankAccount.EnableNpc
+#        Description: Keep banker NPC integration enabled.
+#                     Standalone addon/chat-command access works with this disabled.
 #        Default:     0 - Disabled
 #                     1 - Enabled
-ReagentBankAccount.AccountWide = 0
+ReagentBankAccount.EnableNpc = 0
 
 #    ReagentBankAccount.MaxOptionsPerPage
 #        Description: Number of items shown per page in the reagent bank NPC menu
