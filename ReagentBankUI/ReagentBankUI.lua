@@ -1116,25 +1116,38 @@ function RB:CreateMinimapButton()
     local button = ReagentBankMinimapButton
     button:SetWidth(MINIMAP_BUTTON_SIZE)
     button:SetHeight(MINIMAP_BUTTON_SIZE)
-    button:SetFrameStrata("HIGH")
-    button:SetFrameLevel(12)
+    button:SetFrameStrata("MEDIUM")
+    button:SetFrameLevel(8)
     button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     button:SetClampedToScreen(true)
     button:ClearAllPoints()
     button:SetPoint("CENTER", Minimap, "CENTER", 80, 0)
 
-    local icon = button:CreateTexture(nil, "ARTWORK")
-    icon:SetTexture("Interface\\Icons\\INV_Misc_Bag_10")
-    icon:SetAllPoints(button)
-    button.icon = icon
-    button:SetNormalTexture(icon)
+    if not button.icon then
+        button.icon = button:CreateTexture(nil, "BACKGROUND")
+    end
+    button.icon:SetWidth(20)
+    button.icon:SetHeight(20)
+    button.icon:ClearAllPoints()
+    button.icon:SetPoint("CENTER", button, "CENTER", 0, 0)
+    button.icon:SetTexture("Interface\\Icons\\INV_Misc_Bag_10")
+    button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    local overlay = button:CreateTexture(nil, "OVERLAY")
-    overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-    overlay:SetPoint("CENTER", button, "CENTER", 0, 0)
-    overlay:SetWidth(54)
-    overlay:SetHeight(54)
-    button.overlay = overlay
+    if not button.border then
+        button.border = button:CreateTexture(nil, "OVERLAY")
+    end
+    button.border:SetWidth(52)
+    button.border:SetHeight(52)
+    button.border:ClearAllPoints()
+    button.border:SetPoint("TOPLEFT", button, "TOPLEFT", -10, 10)
+    button.border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+
+    if not button.highlight then
+        button.highlight = button:CreateTexture(nil, "HIGHLIGHT")
+        button.highlight:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+        button.highlight:SetBlendMode("ADD")
+        button.highlight:SetAllPoints(button)
+    end
 
     button:SetScript("OnClick", function(selfButton, mouseButton)
         if mouseButton == "LeftButton" then
