@@ -148,36 +148,6 @@ local PAPERDOLL_BUTTON_HIGHLIGHT_TEXTURE = "Interface\\Minimap\\UI-Minimap-ZoomB
 local PAPERDOLL_BUTTON_HIGHLIGHT_SIZE = 52
 local MINIMAP_BUTTON_DEFAULT_ENABLED = true
 local MINIMAP_BUTTON_SIZE = 32
-local MINIMAP_BUTTON_ICON_SIZE = 17
-local MINIMAP_BUTTON_ICON_CROP = 0.08
-local MINIMAP_BUTTON_DEFAULT_ANGLE = 220
-local MINIMAP_BUTTON_RADIUS = 78
-
-local function NormalizeMinimapAngle(angle)
-    angle = tonumber(angle) or MINIMAP_BUTTON_DEFAULT_ANGLE
-    while angle < 0 do
-        angle = angle + 360
-    end
-    while angle >= 360 do
-        angle = angle - 360
-    end
-    return angle
-end
-
-local function ComputeMinimapAngleDegrees(dx, dy)
-    local angle = nil
-    if math.atan2 then
-        angle = math.deg(math.atan2(dy, dx))
-    else
-        angle = math.deg(math.atan(dy, dx))
-    end
-
-    if not angle then
-        return MINIMAP_BUTTON_DEFAULT_ANGLE
-    end
-
-    return NormalizeMinimapAngle(angle)
-end
 
 local function Trim(text)
     if not text then
@@ -1082,137 +1052,119 @@ function RB:Toggle()
     self:RequestRoot()
 end
 
-function RB:PositionMinimapButton()
-    if not self.minimapButton or not Minimap then
-        return
+function RB:UpdateMinimapButtonVisibility()
+    ReagentBankDB = ReagentBankDB or {}
+    if ReagentBankDB.minimapEnabled == nil then
+        ReagentBankDB.minimapEnabled = MINIMAP_BUTTON_DEFAULT_ENABLED
     end
 
-    ReagentBankUIDB = ReagentBankUIDB or {}
-    local angle = NormalizeMinimapAngle(ReagentBankUIDB.minimapButtonAngle)
-    ReagentBankUIDB.minimapButtonAngle = angle
-    local radians = math.rad(angle)
-    local x = math.cos(radians) * MINIMAP_BUTTON_RADIUS
-    local y = math.sin(radians) * MINIMAP_BUTTON_RADIUS
-
-    self.minimapButton:ClearAllPoints()
-    self.minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
-end
-
-function RB:UpdateMinimapButtonVisibility()
     if not self.minimapButton then
         return
     end
 
-    ReagentBankUIDB = ReagentBankUIDB or {}
-    if ReagentBankUIDB.showMinimapButton then
+    if ReagentBankDB.minimapEnabled then
         self.minimapButton:Show()
     else
         self.minimapButton:Hide()
     end
 end
 
+function RB:DebugMinimapButtonState()
+    ReagentBankDB = ReagentBankDB or {}
+    local button = _G.ReagentBankMinimapButton
+    DEFAULT_CHAT_FRAME:AddMessage("ReagentBank minimap debug:")
+    DEFAULT_CHAT_FRAME:AddMessage("  exists: " .. tostring(button ~= nil))
+    if button then
+        local p = button:GetParent()
+        DEFAULT_CHAT_FRAME:AddMessage("  parent: " .. tostring(p and p:GetName() or "nil"))
+        DEFAULT_CHAT_FRAME:AddMessage("  IsShown: " .. tostring(button:IsShown()))
+        DEFAULT_CHAT_FRAME:AddMessage("  IsVisible: " .. tostring(button:IsVisible()))
+        DEFAULT_CHAT_FRAME:AddMessage("  frame level: " .. tostring(button:GetFrameLevel()))
+        DEFAULT_CHAT_FRAME:AddMessage("  frame strata: " .. tostring(button:GetFrameStrata()))
+        local point, relativeTo, relativePoint, xOfs, yOfs = button:GetPoint(1)
+        DEFAULT_CHAT_FRAME:AddMessage("  point: " .. tostring(point) .. " rel=" .. tostring(relativePoint) .. " x=" .. tostring(xOfs) .. " y=" .. tostring(yOfs))
+    end
+    DEFAULT_CHAT_FRAME:AddMessage("  saved enabled: " .. tostring(ReagentBankDB.minimapEnabled))
+end
+
 function RB:CreateMinimapButton()
-    if self.minimapButton then
+    if self.minimapButton and self.minimapButton.GetObjectType then
         self:UpdateMinimapButtonVisibility()
-        self:PositionMinimapButton()
         return
     end
 
     if not Minimap then
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage("ReagentBank: Minimap frame missing on PLAYER_LOGIN")
+        end
         return
     end
 
-    local button = CreateFrame("Button", "ReagentBankMinimapButton", Minimap)
+    ReagentBankDB = ReagentBankDB or {}
+    if ReagentBankDB.minimapEnabled == nil then
+        ReagentBankDB.minimapEnabled = MINIMAP_BUTTON_DEFAULT_ENABLED
+    end
+    if ReagentBankDB.minimapLocked == nil then
+        ReagentBankDB.minimapLocked = true
+    end
+
+    if DEFAULT_CHAT_FRAME then
+        DEFAULT_CHAT_FRAME:AddMessage("ReagentBank: creating minimap button")
+    end
+
+    ReagentBankMinimapButton = CreateFrame("Button", "ReagentBankMinimapButton", Minimap)
+    local button = ReagentBankMinimapButton
     button:SetWidth(MINIMAP_BUTTON_SIZE)
     button:SetHeight(MINIMAP_BUTTON_SIZE)
     button:SetFrameStrata("HIGH")
-    button:SetFrameLevel(8)
-    button:SetMovable(true)
-    button:SetToplevel(true)
+    button:SetFrameLevel(12)
     button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    button:RegisterForDrag("LeftButton")
     button:SetClampedToScreen(true)
+    button:ClearAllPoints()
+    button:SetPoint("CENTER", Minimap, "CENTER", 80, 0)
 
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetTexture("Interface\\Icons\\INV_Misc_Bag_10")
-    icon:SetPoint("CENTER", 0, 0)
-    icon:SetWidth(MINIMAP_BUTTON_ICON_SIZE)
-    icon:SetHeight(MINIMAP_BUTTON_ICON_SIZE)
-    icon:SetTexCoord(MINIMAP_BUTTON_ICON_CROP, 1 - MINIMAP_BUTTON_ICON_CROP, MINIMAP_BUTTON_ICON_CROP, 1 - MINIMAP_BUTTON_ICON_CROP)
+    icon:SetAllPoints(button)
+    button.icon = icon
+    button:SetNormalTexture(icon)
 
-    local bg = button:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture(PAPERDOLL_BUTTON_BG_TEXTURE)
-    bg:SetPoint("CENTER", 0, 1)
-    bg:SetWidth(PAPERDOLL_BUTTON_BG_SIZE)
-    bg:SetHeight(PAPERDOLL_BUTTON_BG_SIZE)
-    bg:SetVertexColor(PAPERDOLL_BUTTON_BG_R, PAPERDOLL_BUTTON_BG_G, PAPERDOLL_BUTTON_BG_B, PAPERDOLL_BUTTON_BG_A)
-
-    local border = button:CreateTexture(nil, "OVERLAY")
-    border:SetTexture(PAPERDOLL_BUTTON_BORDER_TEXTURE)
-    border:SetPoint("CENTER", 0, 1)
-    border:SetWidth(PAPERDOLL_BUTTON_BORDER_SIZE)
-    border:SetHeight(PAPERDOLL_BUTTON_BORDER_SIZE)
-
-    local highlight = button:CreateTexture(nil, "HIGHLIGHT")
-    highlight:SetTexture(PAPERDOLL_BUTTON_HIGHLIGHT_TEXTURE)
-    highlight:SetBlendMode("ADD")
-    highlight:SetPoint("CENTER", 0, 1)
-    highlight:SetWidth(PAPERDOLL_BUTTON_HIGHLIGHT_SIZE)
-    highlight:SetHeight(PAPERDOLL_BUTTON_HIGHLIGHT_SIZE)
-    button:SetHighlightTexture(highlight)
-
-    button:SetScript("OnDragStart", function(selfButton)
-        ReagentBankUIDB = ReagentBankUIDB or {}
-        if ReagentBankUIDB.minimapLocked then
-            return
-        end
-
-        selfButton:SetScript("OnUpdate", function()
-            local mx, my = GetCursorPosition()
-            local scale = Minimap:GetEffectiveScale() or 1
-            local cx, cy = Minimap:GetCenter()
-            if not cx or not cy then
-                return
-            end
-
-            mx = mx / scale
-            my = my / scale
-            local angle = ComputeMinimapAngleDegrees(mx - cx, my - cy)
-            ReagentBankUIDB.minimapButtonAngle = angle
-            RB:PositionMinimapButton()
-        end)
-    end)
-
-    button:SetScript("OnDragStop", function(selfButton)
-        selfButton:SetScript("OnUpdate", nil)
-    end)
+    local overlay = button:CreateTexture(nil, "OVERLAY")
+    overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    overlay:SetPoint("CENTER", button, "CENTER", 0, 0)
+    overlay:SetWidth(54)
+    overlay:SetHeight(54)
+    button.overlay = overlay
 
     button:SetScript("OnClick", function(selfButton, mouseButton)
         if mouseButton == "LeftButton" then
             RB:Toggle()
         else
-            ReagentBankUIDB = ReagentBankUIDB or {}
-            ReagentBankUIDB.minimapLocked = not ReagentBankUIDB.minimapLocked
-            PrintAddon("minimap dragging " .. (ReagentBankUIDB.minimapLocked and "locked." or "unlocked."))
+            ReagentBankDB = ReagentBankDB or {}
+            ReagentBankDB.minimapLocked = not ReagentBankDB.minimapLocked
+            PrintAddon("minimap lock is now " .. (ReagentBankDB.minimapLocked and "ON" or "OFF"))
         end
     end)
 
     button:SetScript("OnEnter", function(selfButton)
         GameTooltip:SetOwner(selfButton, "ANCHOR_LEFT")
-        ReagentBankUIDB = ReagentBankUIDB or {}
         GameTooltip:SetText("ReagentBankUI", 1, 0.82, 0)
-        GameTooltip:AddLine("Left-click: open or close.", 1, 1, 1)
-        GameTooltip:AddLine("Right-click: lock or unlock drag.", 0.82, 0.82, 0.82)
-        GameTooltip:AddLine("Drag with left mouse when unlocked.", 0.82, 0.82, 0.82)
+        GameTooltip:AddLine("Left-click: toggle Reagent Bank UI", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: toggle lock mode", 0.82, 0.82, 0.82)
         GameTooltip:Show()
     end)
     button:SetScript("OnLeave", HideTooltip)
 
     self.minimapButton = button
-    self:PositionMinimapButton()
     self:UpdateMinimapButtonVisibility()
-    if ReagentBankUIDB and ReagentBankUIDB.showMinimapButton then
-        self.minimapButton:Show()
+    if ReagentBankDB.minimapEnabled then
+        button:Show()
+    else
+        button:Hide()
+    end
+
+    if DEFAULT_CHAT_FRAME then
+        DEFAULT_CHAT_FRAME:AddMessage("ReagentBank: minimap button shown")
     end
 end
 
@@ -2655,24 +2607,30 @@ SlashCmdList["REAGENTBANKUI"] = function(msg)
     end
 
     if command == "minimap" then
-        ReagentBankUIDB = ReagentBankUIDB or {}
+        ReagentBankDB = ReagentBankDB or {}
         local lowerValue = string.lower(value or "")
 
-        if lowerValue == "on" or lowerValue == "1" or lowerValue == "true" then
-            ReagentBankUIDB.showMinimapButton = true
+        if lowerValue == "debug" then
+            RB:CreateMinimapButton()
+            RB:DebugMinimapButtonState()
+            return
+        elseif lowerValue == "on" or lowerValue == "1" or lowerValue == "true" then
+            ReagentBankDB.minimapEnabled = true
         elseif lowerValue == "off" or lowerValue == "0" or lowerValue == "false" then
-            ReagentBankUIDB.showMinimapButton = false
+            ReagentBankDB.minimapEnabled = false
         else
-            ReagentBankUIDB.showMinimapButton = not ReagentBankUIDB.showMinimapButton
+            ReagentBankDB.minimapEnabled = not ReagentBankDB.minimapEnabled
         end
 
         RB:CreateMinimapButton()
         RB:UpdateMinimapButtonVisibility()
-        if ReagentBankUIDB.showMinimapButton and RB.minimapButton then
+        if ReagentBankDB.minimapEnabled and RB.minimapButton then
             RB.minimapButton:Show()
-            RB:PositionMinimapButton()
         end
-        PrintAddon("minimap button " .. (ReagentBankUIDB.showMinimapButton and "enabled." or "disabled."))
+        PrintAddon("minimap button " .. (ReagentBankDB.minimapEnabled and "enabled." or "disabled."))
+        if RB.minimapButton then
+            PrintAddon("minimap button shown state: " .. tostring(RB.minimapButton:IsShown()))
+        end
         return
     end
 
@@ -2698,7 +2656,7 @@ SlashCmdList["REAGENTBANKUI"] = function(msg)
     DEFAULT_CHAT_FRAME:AddMessage("  /rbank scale 0.75 - 1.20")
     DEFAULT_CHAT_FRAME:AddMessage("  /rbank autodeposit on|off")
     DEFAULT_CHAT_FRAME:AddMessage("  /rbank autowithdraw on|off")
-    DEFAULT_CHAT_FRAME:AddMessage("  /rbank minimap on|off")
+    DEFAULT_CHAT_FRAME:AddMessage("  /rbank minimap on|off|debug")
     DEFAULT_CHAT_FRAME:AddMessage("  /craftbag")
 end
 
@@ -2714,15 +2672,6 @@ RB:SetScript("OnEvent", function(self, event, ...)
             if ReagentBankUIDB.autoWithdrawRecipe == nil then
                 ReagentBankUIDB.autoWithdrawRecipe = false
             end
-            if ReagentBankUIDB.showMinimapButton == nil then
-                ReagentBankUIDB.showMinimapButton = MINIMAP_BUTTON_DEFAULT_ENABLED
-            end
-            if ReagentBankUIDB.minimapButtonAngle == nil then
-                ReagentBankUIDB.minimapButtonAngle = MINIMAP_BUTTON_DEFAULT_ANGLE
-            end
-            if ReagentBankUIDB.minimapLocked == nil then
-                ReagentBankUIDB.minimapLocked = true
-            end
             if ReagentBankUIDB.tradeSkillPrepareCount == nil then
                 ReagentBankUIDB.tradeSkillPrepareCount = 1
             else
@@ -2736,28 +2685,13 @@ RB:SetScript("OnEvent", function(self, event, ...)
             self:CreateTradeSkillControls()
         end
     elseif event == "PLAYER_LOGIN" then
-        ReagentBankUIDB = ReagentBankUIDB or {}
-        if ReagentBankUIDB.showMinimapButton == nil then
-            ReagentBankUIDB.showMinimapButton = MINIMAP_BUTTON_DEFAULT_ENABLED
-        end
-        if ReagentBankUIDB.minimapButtonAngle == nil then
-            ReagentBankUIDB.minimapButtonAngle = MINIMAP_BUTTON_DEFAULT_ANGLE
-        end
-        if ReagentBankUIDB.minimapLocked == nil then
-            ReagentBankUIDB.minimapLocked = true
+        ReagentBankDB = ReagentBankDB or {}
+        if ReagentBankDB.minimapEnabled == nil then
+            ReagentBankDB.minimapEnabled = MINIMAP_BUTTON_DEFAULT_ENABLED
         end
         self:CreatePaperDollButton()
         self:CreateMinimapButton()
-        self:UpdateMinimapButtonVisibility()
         self:CreateTradeSkillControls()
-        if DEFAULT_CHAT_FRAME then
-            DEFAULT_CHAT_FRAME:AddMessage("ReagentBank minimap button initialized")
-            if self.minimapButton then
-                DEFAULT_CHAT_FRAME:AddMessage("ReagentBank minimap state: created, visible=" .. tostring(self.minimapButton:IsShown()) .. ", enabled=" .. tostring(ReagentBankUIDB.showMinimapButton))
-            else
-                DEFAULT_CHAT_FRAME:AddMessage("ReagentBank minimap state: button not created")
-            end
-        end
     elseif event == "TRADE_SKILL_SHOW" then
         self:CreateTradeSkillControls()
         self:UpdateTradeSkillControls()
