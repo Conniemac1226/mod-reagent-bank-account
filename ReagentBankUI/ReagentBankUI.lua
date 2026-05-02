@@ -153,6 +153,32 @@ local MINIMAP_BUTTON_ICON_CROP = 0.08
 local MINIMAP_BUTTON_DEFAULT_ANGLE = 220
 local MINIMAP_BUTTON_RADIUS = 78
 
+local function NormalizeMinimapAngle(angle)
+    angle = tonumber(angle) or MINIMAP_BUTTON_DEFAULT_ANGLE
+    while angle < 0 do
+        angle = angle + 360
+    end
+    while angle >= 360 do
+        angle = angle - 360
+    end
+    return angle
+end
+
+local function ComputeMinimapAngleDegrees(dx, dy)
+    local angle = nil
+    if math.atan2 then
+        angle = math.deg(math.atan2(dy, dx))
+    else
+        angle = math.deg(math.atan(dy, dx))
+    end
+
+    if not angle then
+        return MINIMAP_BUTTON_DEFAULT_ANGLE
+    end
+
+    return NormalizeMinimapAngle(angle)
+end
+
 local function Trim(text)
     if not text then
         return ""
@@ -1062,7 +1088,8 @@ function RB:PositionMinimapButton()
     end
 
     ReagentBankUIDB = ReagentBankUIDB or {}
-    local angle = tonumber(ReagentBankUIDB.minimapButtonAngle) or MINIMAP_BUTTON_DEFAULT_ANGLE
+    local angle = NormalizeMinimapAngle(ReagentBankUIDB.minimapButtonAngle)
+    ReagentBankUIDB.minimapButtonAngle = angle
     local radians = math.rad(angle)
     local x = math.cos(radians) * MINIMAP_BUTTON_RADIUS
     local y = math.sin(radians) * MINIMAP_BUTTON_RADIUS
@@ -1098,8 +1125,10 @@ function RB:CreateMinimapButton()
     local button = CreateFrame("Button", "ReagentBankMinimapButton", Minimap)
     button:SetWidth(MINIMAP_BUTTON_SIZE)
     button:SetHeight(MINIMAP_BUTTON_SIZE)
-    button:SetFrameStrata("MEDIUM")
+    button:SetFrameStrata("HIGH")
+    button:SetFrameLevel(8)
     button:SetMovable(true)
+    button:SetToplevel(true)
     button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     button:RegisterForDrag("LeftButton")
     button:SetClampedToScreen(true)
@@ -1148,7 +1177,7 @@ function RB:CreateMinimapButton()
 
             mx = mx / scale
             my = my / scale
-            local angle = math.deg(math.atan(my - cy, mx - cx))
+            local angle = ComputeMinimapAngleDegrees(mx - cx, my - cy)
             ReagentBankUIDB.minimapButtonAngle = angle
             RB:PositionMinimapButton()
         end)
@@ -1182,6 +1211,9 @@ function RB:CreateMinimapButton()
     self.minimapButton = button
     self:PositionMinimapButton()
     self:UpdateMinimapButtonVisibility()
+    if ReagentBankUIDB and ReagentBankUIDB.showMinimapButton then
+        self.minimapButton:Show()
+    end
 end
 
 function RB:PositionPaperDollButton()
@@ -2636,6 +2668,10 @@ SlashCmdList["REAGENTBANKUI"] = function(msg)
 
         RB:CreateMinimapButton()
         RB:UpdateMinimapButtonVisibility()
+        if ReagentBankUIDB.showMinimapButton and RB.minimapButton then
+            RB.minimapButton:Show()
+            RB:PositionMinimapButton()
+        end
         PrintAddon("minimap button " .. (ReagentBankUIDB.showMinimapButton and "enabled." or "disabled."))
         return
     end
@@ -2712,9 +2748,15 @@ RB:SetScript("OnEvent", function(self, event, ...)
         end
         self:CreatePaperDollButton()
         self:CreateMinimapButton()
+        self:UpdateMinimapButtonVisibility()
         self:CreateTradeSkillControls()
         if DEFAULT_CHAT_FRAME then
             DEFAULT_CHAT_FRAME:AddMessage("ReagentBank minimap button initialized")
+            if self.minimapButton then
+                DEFAULT_CHAT_FRAME:AddMessage("ReagentBank minimap state: created, visible=" .. tostring(self.minimapButton:IsShown()) .. ", enabled=" .. tostring(ReagentBankUIDB.showMinimapButton))
+            else
+                DEFAULT_CHAT_FRAME:AddMessage("ReagentBank minimap state: button not created")
+            end
         end
     elseif event == "TRADE_SKILL_SHOW" then
         self:CreateTradeSkillControls()
