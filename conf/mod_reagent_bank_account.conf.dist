@@ -67,3 +67,72 @@ ReagentBankAccount.MaxItemsPerPage = 16
 #        Default:     0
 #
 ReagentBankAccount.EnableSharing = 0
+
+#
+#    ReagentBankAccount.BotAutoDeposit.Enable
+#        Description: Automatically deposits compatible items carried by playerbots.
+#                     Real player sessions are never affected.
+#                     Enabling this by config reload requires eligible bots to relog.
+#        Default:     0
+#
+ReagentBankAccount.BotAutoDeposit.Enable = 0
+
+#
+#    ReagentBankAccount.BotAutoDeposit.OnLogin
+#        Description: Schedules an auto-deposit shortly after an eligible bot logs in.
+#                     When disabled, the first deposit waits for IntervalSeconds.
+#        Default:     1
+#
+ReagentBankAccount.BotAutoDeposit.OnLogin = 1
+
+#
+#    ReagentBankAccount.BotAutoDeposit.IntervalSeconds
+#        Description: Seconds between periodic bot auto-deposits.
+#                     0 disables periodic deposits, allowing login-only operation.
+#                     Non-zero values are clamped to 30-86400 seconds.
+#        Default:     300
+#
+ReagentBankAccount.BotAutoDeposit.IntervalSeconds = 300
+
+#
+#    ReagentBankAccount.BotAutoDeposit.LoginDelaySeconds
+#        Description: Base delay before a login auto-deposit. Clamped to 1-3600 seconds.
+#        Default:     5
+#
+ReagentBankAccount.BotAutoDeposit.LoginDelaySeconds = 5
+
+#
+#    ReagentBankAccount.BotAutoDeposit.RetrySeconds
+#        Description: Retry delay when a bot is fighting, casting, trading, in flight,
+#                     teleporting, or otherwise unsafe to modify. Clamped to 5-300 seconds.
+#        Default:     30
+#
+ReagentBankAccount.BotAutoDeposit.RetrySeconds = 30
+
+#
+#    ReagentBankAccount.BotAutoDeposit.StaggerSeconds
+#        Description: Adds a random 0-N second delay to each bot's initial schedule so
+#                     several alt bots do not deposit at the same instant. Maximum: 300.
+#        Default:     15
+#
+ReagentBankAccount.BotAutoDeposit.StaggerSeconds = 15
+
+#
+#    ReagentBankAccount.BotAutoDeposit.AccountIds
+#        Description: Comma-separated account IDs allowed to use bot auto-deposit.
+#                     Empty means every playerbot account. Use your account ID here to
+#                     leave random bots and bots belonging to other accounts untouched.
+#        Example:     "1, 7"
+#        Default:     ""
+#
+ReagentBankAccount.BotAutoDeposit.AccountIds = ""
+
+#
+#    ReagentBankAccount.BotAutoDeposit.RetainItemCounts
+#        Description: Comma-separated itemEntry:amount pairs kept in each bot's bags.
+#                     Only amounts above the retained count are auto-deposited. This is
+#                     useful for class reagents, explosives, devices, and crafting tools.
+#        Example:     "21177:20, 17020:20"
+#        Default:     ""
+#
+ReagentBankAccount.BotAutoDeposit.RetainItemCounts = ""

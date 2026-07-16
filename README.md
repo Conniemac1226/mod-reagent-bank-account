@@ -22,6 +22,7 @@ This module adds a server-backed reagent bank for trade goods, gems, and craftin
 - Sort categories and items by several modes
 - Movable, scalable, skinnable addon window
 - Periodic auto-deposit timer
+- Optional server-side playerbot auto-deposit on login and at a configurable interval
 - Character paperdoll launcher button
 
 ---
@@ -64,6 +65,31 @@ Shopping list features:
 - Compact AH helper panel opens beside the Auction House frame
 
 Note: AH purchases do not automatically decrement the list. Adjust amounts manually from the list. I also have not tested this with any other AH addons.
+
+---
+
+## Playerbot Auto-Deposit
+
+The server can automatically move compatible reagents from playerbot bags into reagent-bank storage. It uses the same
+item categories and global deposit exclusions as the manual **Deposit All** action. Real player sessions are never
+affected.
+
+Set `ReagentBankAccount.BotAutoDeposit.Enable = 1` and place the account IDs that should participate in
+`ReagentBankAccount.BotAutoDeposit.AccountIds`. Leaving the account list empty enables the feature for every playerbot
+account, including random bots.
+
+When enabling the feature through a live configuration reload, eligible bots must relog to start their schedules.
+
+With `ReagentBankAccount.AccountWide = 1`, alt bots on the same account deposit into the account's shared reagent bank.
+In character-wide mode, each bot deposits into its own character bank unless reagent-bank sharing redirects that
+character to another owner.
+
+Auto-deposits wait until the bot is alive, out of combat, not casting, not trading, not in flight, and not teleporting.
+`RetainItemCounts` can reserve useful supplies in each bot's bags; for example, `21177:20` keeps 20 Symbols of Kings and
+deposits only the excess.
+
+See `conf/mod_reagent_bank_account.conf.dist` for all timer, retry, staggering, account allowlist, and retained-item
+settings.
 
 ---
 

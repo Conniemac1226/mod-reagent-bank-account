@@ -44,12 +44,14 @@
 #include "ChatCommand.h"
 #include "Config.h"
 #include "DatabaseEnv.h"
+#include "Duration.h"
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "Log.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "Random.h"
 #include "ScriptMgr.h"
 #include "StringFormat.h"
 #include "WorldSession.h"
@@ -75,7 +77,15 @@ bool g_reagentBankEnableNpc = false;
 
 static bool g_reagentBankStorageReady = false;
 static bool g_reagentBankSharingEnabled = false;
+static bool g_reagentBankBotAutoDepositEnabled = false;
+static bool g_reagentBankBotAutoDepositOnLogin = true;
+static uint32 g_reagentBankBotAutoDepositIntervalSeconds = 300;
+static uint32 g_reagentBankBotAutoDepositLoginDelaySeconds = 5;
+static uint32 g_reagentBankBotAutoDepositRetrySeconds = 30;
+static uint32 g_reagentBankBotAutoDepositStaggerSeconds = 15;
 static std::unordered_set<uint32> g_reagentBankDepositExclusions;
+static std::unordered_set<uint32> g_reagentBankBotAutoDepositAccountIds;
+static std::map<uint32, uint32> g_reagentBankBotAutoDepositRetainCounts;
 static std::unordered_map<uint32, uint32> g_shareOwnerByKey;
 
 using Acore::ChatCommands::ChatCommandTable;
@@ -144,6 +154,18 @@ namespace ReagentBank
         return value;
     }
 
+    static std::string Trim(std::string value)
+    {
+        auto const isSpace = [](unsigned char c) { return std::isspace(c); };
+        auto const first = std::find_if_not(value.begin(), value.end(), isSpace);
+        auto const last = std::find_if_not(value.rbegin(), value.rend(), isSpace).base();
+
+        if (first >= last)
+            return "";
+
+        return std::string(first, last);
+    }
+
     static std::vector<std::string> Tokenize(char const* args)
     {
         std::vector<std::string> tokens;
@@ -187,6 +209,63 @@ namespace ReagentBank
 
         out = current + add;
         return true;
+    }
+
+    static void LoadBotAutoDepositAccountIds(std::string const& configValue)
+    {
+        g_reagentBankBotAutoDepositAccountIds.clear();
+
+        std::istringstream stream(configValue);
+        std::string token;
+        while (std::getline(stream, token, ','))
+        {
+            token = Trim(token);
+            if (token.empty())
+                continue;
+
+            uint32 accountId = 0;
+            if (!TryParseUInt32(token, accountId) || !accountId)
+            {
+                LOG_WARN("module", "ReagentBankAccount: ignored invalid BotAutoDeposit.AccountIds value '{}'.", token);
+                continue;
+            }
+
+            g_reagentBankBotAutoDepositAccountIds.insert(accountId);
+        }
+    }
+
+    static void LoadBotAutoDepositRetainCounts(std::string const& configValue)
+    {
+        g_reagentBankBotAutoDepositRetainCounts.clear();
+
+        std::istringstream stream(configValue);
+        std::string token;
+        while (std::getline(stream, token, ','))
+        {
+            token = Trim(token);
+            if (token.empty())
+                continue;
+
+            std::size_t const separator = token.find(':');
+            if (separator == std::string::npos)
+            {
+                LOG_WARN("module", "ReagentBankAccount: ignored invalid BotAutoDeposit.RetainItemCounts value '{}'.",
+                    token);
+                continue;
+            }
+
+            uint32 itemEntry = 0;
+            uint32 amount = 0;
+            if (!TryParseUInt32(Trim(token.substr(0, separator)), itemEntry) ||
+                !TryParseUInt32(Trim(token.substr(separator + 1)), amount) || !itemEntry || !amount)
+            {
+                LOG_WARN("module", "ReagentBankAccount: ignored invalid BotAutoDeposit.RetainItemCounts value '{}'.",
+                    token);
+                continue;
+            }
+
+            g_reagentBankBotAutoDepositRetainCounts[itemEntry] = amount;
+        }
     }
 
     static bool AddToItemAmountMapChecked(ItemAmountMap& map, uint32 itemEntry, uint32 amount)
@@ -348,12 +427,39 @@ namespace ReagentBank
         g_reagentBankAutoMigrate = sConfigMgr->GetOption<bool>("ReagentBankAccount.AutoMigrate", true);
         g_reagentBankEnableNpc = sConfigMgr->GetOption<bool>("ReagentBankAccount.EnableNpc", false);
         g_reagentBankSharingEnabled = sConfigMgr->GetOption<bool>("ReagentBankAccount.EnableSharing", false);
+        g_reagentBankBotAutoDepositEnabled = sConfigMgr->GetOption<bool>(
+            "ReagentBankAccount.BotAutoDeposit.Enable", false);
+        g_reagentBankBotAutoDepositOnLogin = sConfigMgr->GetOption<bool>(
+            "ReagentBankAccount.BotAutoDeposit.OnLogin", true);
+        g_reagentBankBotAutoDepositIntervalSeconds = sConfigMgr->GetOption<uint32>(
+            "ReagentBankAccount.BotAutoDeposit.IntervalSeconds", 300);
+        g_reagentBankBotAutoDepositLoginDelaySeconds = sConfigMgr->GetOption<uint32>(
+            "ReagentBankAccount.BotAutoDeposit.LoginDelaySeconds", 5);
+        g_reagentBankBotAutoDepositRetrySeconds = sConfigMgr->GetOption<uint32>(
+            "ReagentBankAccount.BotAutoDeposit.RetrySeconds", 30);
+        g_reagentBankBotAutoDepositStaggerSeconds = sConfigMgr->GetOption<uint32>(
+            "ReagentBankAccount.BotAutoDeposit.StaggerSeconds", 15);
+
+        LoadBotAutoDepositAccountIds(sConfigMgr->GetOption<std::string>(
+            "ReagentBankAccount.BotAutoDeposit.AccountIds", ""));
+        LoadBotAutoDepositRetainCounts(sConfigMgr->GetOption<std::string>(
+            "ReagentBankAccount.BotAutoDeposit.RetainItemCounts", ""));
 
         if (g_reagentBankMaxItemsPerPage == 0)
             g_reagentBankMaxItemsPerPage = DEFAULT_REAGENT_BANK_ITEMS_PER_PAGE;
 
         if (g_reagentBankMaxItemsPerPage > 50)
             g_reagentBankMaxItemsPerPage = 50;
+
+        if (g_reagentBankBotAutoDepositIntervalSeconds && g_reagentBankBotAutoDepositIntervalSeconds < 30)
+            g_reagentBankBotAutoDepositIntervalSeconds = 30;
+
+        g_reagentBankBotAutoDepositIntervalSeconds = std::min<uint32>(
+            g_reagentBankBotAutoDepositIntervalSeconds, 86400);
+        g_reagentBankBotAutoDepositLoginDelaySeconds = std::clamp<uint32>(
+            g_reagentBankBotAutoDepositLoginDelaySeconds, 1, 3600);
+        g_reagentBankBotAutoDepositRetrySeconds = std::clamp<uint32>(g_reagentBankBotAutoDepositRetrySeconds, 5, 300);
+        g_reagentBankBotAutoDepositStaggerSeconds = std::min<uint32>(g_reagentBankBotAutoDepositStaggerSeconds, 300);
     }
 
     static uint64 QueryUInt64(char const* sql)
@@ -868,6 +974,38 @@ namespace ReagentBank
         CharacterDatabase.CommitTransaction(trans);
     }
 
+    static void AddDepositedItems(Player const* player, std::map<uint32, StoredItem> const& storedItems,
+        ItemAmountMap const& deposited)
+    {
+        if (deposited.empty())
+            return;
+
+        uint32 accountKey = 0;
+        uint32 guidKey = 0;
+        GetStorageKeys(player, accountKey, guidKey);
+
+        auto trans = CharacterDatabase.BeginTransaction();
+
+        for (std::pair<uint32 const, uint32> const& pair : deposited)
+        {
+            auto const storedItr = storedItems.find(pair.first);
+            if (storedItr == storedItems.end())
+                continue;
+
+            StoredItem const& item = storedItr->second;
+            trans->Append(
+                "INSERT INTO mod_reagent_bank_account "
+                "(account_id, guid, item_entry, item_subclass, amount) "
+                "VALUES ({}, {}, {}, {}, {}) "
+                "ON DUPLICATE KEY UPDATE "
+                "amount = LEAST(4294967295, amount + VALUES(amount)), "
+                "item_subclass = VALUES(item_subclass)",
+                accountKey, guidKey, item.ItemEntry, item.ItemSubclass, pair.second);
+        }
+
+        CharacterDatabase.CommitTransaction(trans);
+    }
+
     static void QueryCategoryTotals(Player const* player, uint32 category, uint32& typeCount, uint64& totalAmount)
     {
         typeCount = 0;
@@ -1010,10 +1148,12 @@ namespace ReagentBank
         SendProtocol(handler, "RBANK:END:CATEGORY");
     }
 
-    static uint32 DepositFromSlot(Player* player, uint8 bagSlot, uint8 itemSlot, uint32 onlyCategory, std::map<uint32, StoredItem>& storedItems, ItemAmountMap& deposited, bool& overflowed)
+    static uint32 DepositFromSlot(Player* player, uint8 bagSlot, uint8 itemSlot, uint32 onlyCategory,
+        std::map<uint32, StoredItem>& storedItems, ItemAmountMap& deposited, bool& overflowed,
+        ItemAmountMap const* retainCounts, ItemAmountMap& retained)
     {
         Item* item = player->GetItemByPos(bagSlot, itemSlot);
-        if (!item)
+        if (!item || item->IsInTrade())
             return 0;
 
         uint32 itemEntry = 0;
@@ -1027,8 +1167,23 @@ namespace ReagentBank
         if (onlyCategory && itemSubclass != onlyCategory)
             return 0;
 
-        uint32 const count = item->GetCount();
-        if (!count)
+        uint32 const stackCount = item->GetCount();
+        if (!stackCount)
+            return 0;
+
+        uint32 depositCount = stackCount;
+        if (retainCounts)
+        {
+            auto const retainItr = retainCounts->find(itemEntry);
+            if (retainItr != retainCounts->end() && retained[itemEntry] < retainItr->second)
+            {
+                uint32 const amountToRetain = std::min<uint32>(stackCount, retainItr->second - retained[itemEntry]);
+                retained[itemEntry] += amountToRetain;
+                depositCount -= amountToRetain;
+            }
+        }
+
+        if (!depositCount)
             return 0;
 
         StoredItem& stored = storedItems[itemEntry];
@@ -1036,21 +1191,30 @@ namespace ReagentBank
         stored.ItemSubclass = itemSubclass;
 
         uint32 updatedStoredAmount = 0;
-        if (!AddAmountChecked(stored.Amount, count, updatedStoredAmount) || !AddToItemAmountMapChecked(deposited, itemEntry, count))
+        if (!AddAmountChecked(stored.Amount, depositCount, updatedStoredAmount) ||
+            !AddToItemAmountMapChecked(deposited, itemEntry, depositCount))
         {
             overflowed = true;
             LOG_ERROR("module", "ReagentBankAccount: refused deposit overflow for player {} item {} count {} stored {}.",
-                player->GetGUID().ToString(), itemEntry, count, stored.Amount);
+                player->GetGUID().ToString(), itemEntry, depositCount, stored.Amount);
             return 0;
         }
 
         stored.Amount = updatedStoredAmount;
 
-        player->DestroyItem(bagSlot, itemSlot, true);
-        return count;
+        if (depositCount == stackCount)
+            player->DestroyItem(bagSlot, itemSlot, true);
+        else
+        {
+            uint32 amountToDestroy = depositCount;
+            player->DestroyItemCount(item, amountToDestroy, true);
+        }
+
+        return depositCount;
     }
 
-    static uint32 Deposit(Player* player, uint32 onlyCategory, ItemAmountMap& deposited, bool& overflowed)
+    static uint32 Deposit(Player* player, uint32 onlyCategory, ItemAmountMap& deposited, bool& overflowed,
+        ItemAmountMap const* retainCounts = nullptr)
     {
         deposited.clear();
         overflowed = false;
@@ -1060,12 +1224,14 @@ namespace ReagentBank
 
         std::map<uint32, StoredItem> storedItems;
         LoadStoredItems(player, storedItems);
+        ItemAmountMap retained;
 
         uint32 totalDeposited = 0;
 
         for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
         {
-            uint32 const depositedFromSlot = DepositFromSlot(player, INVENTORY_SLOT_BAG_0, slot, onlyCategory, storedItems, deposited, overflowed);
+            uint32 const depositedFromSlot = DepositFromSlot(player, INVENTORY_SLOT_BAG_0, slot, onlyCategory,
+                storedItems, deposited, overflowed, retainCounts, retained);
             uint32 updatedTotal = 0;
             if (AddAmountChecked(totalDeposited, depositedFromSlot, updatedTotal))
                 totalDeposited = updatedTotal;
@@ -1084,7 +1250,8 @@ namespace ReagentBank
 
             for (uint32 slot = 0; slot < bag->GetBagSize(); ++slot)
             {
-                uint32 const depositedFromSlot = DepositFromSlot(player, bagSlot, uint8(slot), onlyCategory, storedItems, deposited, overflowed);
+                uint32 const depositedFromSlot = DepositFromSlot(player, bagSlot, uint8(slot), onlyCategory,
+                    storedItems, deposited, overflowed, retainCounts, retained);
                 uint32 updatedTotal = 0;
                 if (AddAmountChecked(totalDeposited, depositedFromSlot, updatedTotal))
                     totalDeposited = updatedTotal;
@@ -1099,23 +1266,15 @@ namespace ReagentBank
                 break;
         }
 
-        std::map<uint32, StoredItem> changedItems;
-        for (std::pair<uint32 const, uint32> const& pair : deposited)
-        {
-            std::map<uint32, StoredItem>::const_iterator storedItr = storedItems.find(pair.first);
-            if (storedItr != storedItems.end())
-                changedItems[pair.first] = storedItr->second;
-        }
-
-        SaveStoredItems(player, changedItems);
+        AddDepositedItems(player, storedItems, deposited);
         return totalDeposited;
     }
 
-
-    static uint32 PreviewDepositFromSlot(Player* player, uint8 bagSlot, uint8 itemSlot, uint32 onlyCategory, std::map<uint32, StoredItem>& simulatedStoredItems, ItemAmountMap& previewItems, bool& overflowed)
+    static uint32 PreviewDepositFromSlot(Player* player, uint8 bagSlot, uint8 itemSlot, uint32 onlyCategory,
+        std::map<uint32, StoredItem>& simulatedStoredItems, ItemAmountMap& previewItems, bool& overflowed)
     {
         Item* item = player->GetItemByPos(bagSlot, itemSlot);
-        if (!item)
+        if (!item || item->IsInTrade())
             return 0;
 
         uint32 itemEntry = 0;
@@ -1262,15 +1421,7 @@ namespace ReagentBank
             }
         }
 
-        std::map<uint32, StoredItem> changedItems;
-        for (std::pair<uint32 const, uint32> const& pair : deposited)
-        {
-            std::map<uint32, StoredItem>::const_iterator storedItr = storedItems.find(pair.first);
-            if (storedItr != storedItems.end())
-                changedItems[pair.first] = storedItr->second;
-        }
-
-        SaveStoredItems(player, changedItems);
+        AddDepositedItems(player, storedItems, deposited);
         return totalDeposited;
     }
 
@@ -1296,8 +1447,8 @@ namespace ReagentBank
         return item.ItemEntry && item.Amount && IsCategory(item.ItemSubclass);
     }
 
-
-    static void SendRecipeCheck(ChatHandler* handler, Player const* player, uint32 requestId, std::vector<std::pair<uint32, uint32>> const& requestedItems)
+    static void SendRecipeCheck(ChatHandler* handler, Player const* player, uint32 requestId,
+        std::vector<std::pair<uint32, uint32>> const& requestedItems)
     {
         if (!handler || !player)
             return;
@@ -1607,6 +1758,128 @@ namespace ReagentBank
             ChatHandler targetHandler(target->GetSession());
             SendProtocol(&targetHandler, protocolLine);
         }
+    }
+
+    static void NotifyStorageChanged(Player const* player)
+    {
+        uint32 accountKey = 0;
+        uint32 guidKey = 0;
+        GetStorageKeys(player, accountKey, guidKey);
+
+        uint32 const ownerKey = g_accountWideReagentBank ? accountKey : guidKey;
+        NotifyPlayersByKey(ownerKey, "RBANK:SHARE:REFRESH");
+
+        if (!g_reagentBankSharingEnabled)
+            return;
+
+        QueryResult members = CharacterDatabase.Query(
+            "SELECT member_key FROM mod_reagent_bank_share_members WHERE owner_key = {}",
+            ownerKey);
+
+        if (!members)
+            return;
+
+        do
+        {
+            uint32 const memberKey = (*members)[0].Get<uint32>();
+            NotifyPlayersByKey(memberKey, "RBANK:SHARE:REFRESH");
+        } while (members->NextRow());
+    }
+
+    static void ScheduleStorageRefresh(Player* player)
+    {
+        if (!player)
+            return;
+
+        ObjectGuid const playerGuid = player->GetGUID();
+        player->m_Events.AddEventAtOffset([playerGuid]
+            {
+                if (Player* bot = ObjectAccessor::FindPlayer(playerGuid))
+                    NotifyStorageChanged(bot);
+            }, 1s);
+    }
+
+    static bool IsBotAutoDepositCandidate(Player const* player)
+    {
+        if (!g_reagentBankEnabled || !g_reagentBankStorageReady || !g_reagentBankBotAutoDepositEnabled ||
+            !player || !player->GetSession() || !player->GetSession()->IsBot())
+            return false;
+
+        uint32 const accountId = player->GetSession()->GetAccountId();
+        return g_reagentBankBotAutoDepositAccountIds.empty() ||
+            g_reagentBankBotAutoDepositAccountIds.contains(accountId);
+    }
+
+    static bool IsBotAutoDepositSafe(Player const* player)
+    {
+        return player && player->GetSession() && player->IsInWorld() && player->IsAlive() &&
+            !player->IsDuringRemoveFromWorld() && !player->IsBeingTeleported() &&
+            !player->GetSession()->isLogingOut() && !player->IsInCombat() && !player->IsInFlight() &&
+            !player->IsNonMeleeSpellCast(true) && !player->GetTradeData();
+    }
+
+    static uint32 GetBotAutoDepositStagger()
+    {
+        if (!g_reagentBankBotAutoDepositStaggerSeconds)
+            return 0;
+
+        return urand(0, g_reagentBankBotAutoDepositStaggerSeconds);
+    }
+
+    static void ScheduleBotAutoDeposit(Player* player, uint32 delaySeconds)
+    {
+        if (!IsBotAutoDepositCandidate(player))
+            return;
+
+        ObjectGuid const playerGuid = player->GetGUID();
+        player->m_Events.AddEventAtOffset([playerGuid]
+            {
+                Player* bot = ObjectAccessor::FindPlayer(playerGuid);
+                if (!IsBotAutoDepositCandidate(bot))
+                    return;
+
+                if (!IsBotAutoDepositSafe(bot))
+                {
+                    ScheduleBotAutoDeposit(bot, g_reagentBankBotAutoDepositRetrySeconds);
+                    return;
+                }
+
+                ItemAmountMap deposited;
+                bool overflowed = false;
+                uint32 const total = Deposit(bot, 0, deposited, overflowed,
+                    &g_reagentBankBotAutoDepositRetainCounts);
+
+                if (total)
+                {
+                    ScheduleStorageRefresh(bot);
+                    LOG_INFO("module", "ReagentBankAccount: auto-deposited {} reagent(s) from bot {} on account {}.",
+                        total, bot->GetName(), bot->GetSession()->GetAccountId());
+                }
+
+                if (overflowed)
+                {
+                    LOG_WARN("module", "ReagentBankAccount: bot {} skipped one or more auto-deposit stacks because "
+                        "the stored amount cap was reached.", bot->GetName());
+                }
+
+                if (g_reagentBankBotAutoDepositIntervalSeconds)
+                    ScheduleBotAutoDeposit(bot, g_reagentBankBotAutoDepositIntervalSeconds);
+            }, Seconds(delaySeconds));
+    }
+
+    static void StartBotAutoDepositSchedule(Player* player)
+    {
+        if (!IsBotAutoDepositCandidate(player))
+            return;
+
+        uint32 const initialDelay = g_reagentBankBotAutoDepositOnLogin
+            ? g_reagentBankBotAutoDepositLoginDelaySeconds
+            : g_reagentBankBotAutoDepositIntervalSeconds;
+
+        if (!initialDelay)
+            return;
+
+        ScheduleBotAutoDeposit(player, initialDelay + GetBotAutoDepositStagger());
     }
 
     static void SendShareOpen(ChatHandler* handler, Player const* player)
@@ -1996,7 +2269,6 @@ private:
             ReagentBank::SendCategory(handler, player, category, page, sortMode);
             return true;
         }
-
 
         if (command == "preview")
         {
@@ -2483,12 +2755,16 @@ public:
                 ReagentBank::LoadShareMembers();
             g_reagentBankStorageReady = true;
 
-            LOG_INFO("module", "Standalone Reagent Bank config reloaded. Enabled: {}, AccountWide: {}, AutoMigrate: {}, EnableNpc: {}, MaxItemsPerPage: {}",
+            LOG_INFO("module", "Standalone Reagent Bank config reloaded. Enabled: {}, AccountWide: {}, "
+                "AutoMigrate: {}, EnableNpc: {}, MaxItemsPerPage: {}, BotAutoDeposit: {}, "
+                "BotAutoDepositInterval: {}",
                 g_reagentBankEnabled ? "yes" : "no",
                 g_accountWideReagentBank ? "yes" : "no",
                 g_reagentBankAutoMigrate ? "yes" : "no",
                 g_reagentBankEnableNpc ? "yes" : "no",
-                g_reagentBankMaxItemsPerPage);
+                g_reagentBankMaxItemsPerPage,
+                g_reagentBankBotAutoDepositEnabled ? "yes" : "no",
+                g_reagentBankBotAutoDepositIntervalSeconds);
         }
     }
 
@@ -2501,22 +2777,30 @@ public:
             ReagentBank::LoadShareMembers();
         g_reagentBankStorageReady = true;
 
-        LOG_INFO("module", "Standalone Reagent Bank command module loaded. Enabled: {}, AccountWide: {}, AutoMigrate: {}, EnableNpc: {}, MaxItemsPerPage: {}",
+        LOG_INFO("module", "Standalone Reagent Bank command module loaded. Enabled: {}, AccountWide: {}, "
+            "AutoMigrate: {}, EnableNpc: {}, MaxItemsPerPage: {}, BotAutoDeposit: {}, "
+            "BotAutoDepositInterval: {}",
             g_reagentBankEnabled ? "yes" : "no",
             g_accountWideReagentBank ? "yes" : "no",
             g_reagentBankAutoMigrate ? "yes" : "no",
             g_reagentBankEnableNpc ? "yes" : "no",
-            g_reagentBankMaxItemsPerPage);
+            g_reagentBankMaxItemsPerPage,
+            g_reagentBankBotAutoDepositEnabled ? "yes" : "no",
+            g_reagentBankBotAutoDepositIntervalSeconds);
     }
 };
 
 class mod_reagent_bank_account_playerscript : public PlayerScript
 {
 public:
-    mod_reagent_bank_account_playerscript() : PlayerScript("mod_reagent_bank_account_playerscript") {}
+    mod_reagent_bank_account_playerscript() : PlayerScript("mod_reagent_bank_account_playerscript", {
+        PLAYERHOOK_ON_LOGIN
+    }) {}
 
     void OnPlayerLogin(Player* player) override
     {
+        ReagentBank::StartBotAutoDepositSchedule(player);
+
         if (!g_reagentBankEnabled || !g_reagentBankStorageReady || !g_reagentBankSharingEnabled)
             return;
 
