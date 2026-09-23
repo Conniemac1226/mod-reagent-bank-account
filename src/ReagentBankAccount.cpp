@@ -1814,7 +1814,7 @@ namespace ReagentBank
     {
         return player && player->GetSession() && player->IsInWorld() && player->IsAlive() &&
             !player->IsDuringRemoveFromWorld() && !player->IsBeingTeleported() &&
-            !player->GetSession()->isLogingOut() && !player->IsInCombat() && !player->IsInFlight() &&
+            !player->GetSession()->IsLoggingOut() && !player->IsInCombat() && !player->IsInFlight() &&
             !player->IsNonMeleeSpellCast(true) && !player->GetTradeData();
     }
 
