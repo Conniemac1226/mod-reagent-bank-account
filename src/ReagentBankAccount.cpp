@@ -1802,7 +1802,7 @@ namespace ReagentBank
     static bool IsBotAutoDepositCandidate(Player const* player)
     {
         if (!g_reagentBankEnabled || !g_reagentBankStorageReady || !g_reagentBankBotAutoDepositEnabled ||
-            !player || !player->GetSession() || !player->GetSession()->IsBot())
+            !player || !player->GetSession() || !player->GetSession()->IsHeadless())
             return false;
 
         uint32 const accountId = player->GetSession()->GetAccountId();
